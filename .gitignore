@@ -1,0 +1,17 @@
+# IDEs config folders
+.vscode/
+.idea/
+
+# Input and output
+data/
+data
+outputs/
+playground/
+
+# Python cache files
+*.pyc
+__pycache__/
+
+# Environment files
+.env
+.venv/
