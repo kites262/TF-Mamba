@@ -27,14 +27,14 @@ class SwanLabConsole:
             ),
         )
 
-    def log(self, metrics: Metrics):
+    def log(self, metrics: Metrics, stage: str):
         swanlab.log(
             {
-                "loss": metrics.loss,
-                "OA": metrics.oa,
-                "Recall": metrics.recall,
-                "Precision": metrics.precision,
-                "F1-Score": metrics.f1_score,
+                f"{stage}/loss": metrics.loss,
+                f"{stage}/OA": metrics.oa,
+                f"{stage}/Recall": metrics.recall,
+                f"{stage}/Precision": metrics.precision,
+                f"{stage}/F1-Score": metrics.f1_score,
             },
             step=metrics.step,
         )
@@ -46,7 +46,7 @@ def setup_loguru_logger(metadata: ExperimentMetadata) -> None:
         "|"
         "<green>{level: <6}</green>"
         "|"
-        "<cyan>{module: <20}</cyan>:<cyan>{line: <4}</cyan>"
+        "<cyan>{module: <12}</cyan>:<cyan>{line: <4}</cyan>"
         "> "
         "{message}"
     )

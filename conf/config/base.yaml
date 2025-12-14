@@ -2,7 +2,7 @@ instance:
   _target_: tfmamba.protocol.experiment.ExperimentConfig
   seed: 42
   lr: 1e-3
-  epochs: 200
+  epochs: 40
 
   train_samples: 0.7
   val_samples: 0.2

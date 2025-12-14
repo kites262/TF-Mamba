@@ -15,4 +15,5 @@ class ConsoleCommon(Protocol):
     def log(
         self,
         metrics: Metrics,
+        stage: str,
     ) -> None: ...
