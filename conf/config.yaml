@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+  - config: base
+  - model: TFMamba
+  - console: swanlab
+
+root_dir: ${hydra:runtime.cwd}
+data_dir: ${root_dir}/data
+
+hydra:
+  job:
+    chdir: true
+
+device: cuda
+
+metadata:
+  instance:
+    _target_: tfmamba.protocol.experiment.ExperimentMetadata
+    name: TF-Mamba Experiment
+    project: TF-Mamba-Project
+    description: Experimenting with TF-Mamba model training

@@ -1,0 +1,19 @@
+instance:
+  _target_: tfmamba.protocol.experiment.ExperimentConfig
+  seed: 42
+  lr: 1e-3
+  epochs: 200
+
+  train_samples: 0.7
+  val_samples: 0.2
+  test_samples: 0.1
+
+  num_classes: 10
+
+  window_size: 2048
+  stride: 1024
+  batch_size: 64
+
+  dataloader:
+    num_workers: 8
+    pin_memory: true
