@@ -1,3 +1,6 @@
+# Project specific ignores
+efmamba.egg-info/
+
 # IDEs config folders
 .vscode/
 .idea/

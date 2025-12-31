@@ -1,2 +1,0 @@
-instance:
-  _target_: tfmamba.model.TFMambaModel

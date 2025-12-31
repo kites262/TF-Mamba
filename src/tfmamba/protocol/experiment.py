@@ -16,6 +16,7 @@ class ExperimentConfig:
     train_samples: float
     val_samples: float
     test_samples: float
+    split_level: str
 
     num_classes: int
 

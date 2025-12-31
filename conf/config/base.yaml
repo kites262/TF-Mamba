@@ -13,6 +13,7 @@ instance:
   window_size: 2048
   stride: 1024
   batch_size: 64
+  split_level: file
 
   dataloader:
     num_workers: 8

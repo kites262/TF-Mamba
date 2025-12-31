@@ -5,7 +5,7 @@ from tfmamba.protocol.metrics import Metrics
 
 
 @runtime_checkable
-class ConsoleCommon(Protocol):
+class ConsoleProtocol(Protocol):
     def init(
         self,
         metadata: ExperimentMetadata,

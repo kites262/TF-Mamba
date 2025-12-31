@@ -16,7 +16,7 @@ class CWRUPipeline:
         self.config = config
 
         self.files: list[DatasetFile] = []
-        self.samples: dict[str, list[DatasetSample]] = {
+        self.splits: dict[str, list[DatasetSample]] = {
             "train": [],
             "val": [],
             "test": [],
@@ -28,18 +28,71 @@ class CWRUPipeline:
         self._load_files()
         logger.info(f"Found {len(self.files)} dataset files.")
 
-        for file in self.files:
-            splits = self._create_splits(file)
-            for split, split_samples in splits.items():
-                self.samples[split].extend(split_samples)
+        if self.config.split_level == "window":
+            logger.info("Splitting dataset by window...")
+            self._split_by_window()
+        elif self.config.split_level == "file":
+            logger.info("Splitting dataset by file...")
+            self._split_by_file()
+        else:
+            raise ValueError(f"Unsupported split level: {self.config.split_level}")
 
+    def get_samples(self, split: str) -> list[DatasetSample]:
+        return self.splits[split]
+
+    def _split_by_window(self):
         rng = random.Random(self.config.seed)
-        for split, split_samples in self.samples.items():
+
+        for file in self.files:
+            samples = self._create_splits(file)
+            n = len(samples)
+
+            n_train = int(n * self.config.train_samples)
+            n_val = int(n * self.config.val_samples)
+
+            train_samples = samples[:n_train]
+            val_samples = samples[n_train : n_train + n_val]
+            test_samples = samples[n_train + n_val :]
+
+            self.splits["train"].extend(train_samples)
+            self.splits["val"].extend(val_samples)
+            self.splits["test"].extend(test_samples)
+
+        for split, split_samples in self.splits.items():
             rng.shuffle(split_samples)
             logger.info(f"Total {split} samples: {len(split_samples)}")
 
-    def get_samples(self, split: str) -> list[DatasetSample]:
-        return self.samples[split]
+    def _split_by_file(self):
+        rng = random.Random(self.config.seed)
+
+        label_files: dict[int, list[DatasetFile]] = {}
+        for file in self.files:
+            label_files.setdefault(file.label, []).append(file)
+
+        split_files: dict[str, list[DatasetFile]] = {
+            "train": [],
+            "val": [],
+            "test": [],
+        }
+
+        for _, files in label_files.items():
+            rng.shuffle(files)
+
+            n_train = 2
+            n_val = 1
+
+            split_files["train"].extend(files[:n_train])
+            split_files["val"].extend(files[n_train : n_train + n_val])
+            split_files["test"].extend(files[n_train + n_val :])
+
+        for split, split_files_list in split_files.items():
+            for file in split_files_list:
+                samples = self._create_splits(file)
+                self.splits[split].extend(samples)
+
+        for split, split_samples in self.splits.items():
+            rng.shuffle(split_samples)
+            logger.info(f"Total {split} samples: {len(split_samples)}")
 
     def _load_files(self):
         """
@@ -85,7 +138,7 @@ class CWRUPipeline:
                 )
                 self.files.append(dataset_file)
 
-    def _create_splits(self, file: DatasetFile) -> dict[str, list[DatasetSample]]:
+    def _create_splits(self, file: DatasetFile) -> list[DatasetSample]:
         signal = file.signal
 
         length = len(signal)
@@ -101,20 +154,4 @@ class CWRUPipeline:
                     length=win,
                 ),
             )
-
-        rng = random.Random(self.config.seed)
-        rng.shuffle(samples)
-
-        n = len(samples)
-        n_train = int(n * self.config.train_samples)
-        n_val = int(n * self.config.val_samples)
-
-        train_samples = samples[:n_train]
-        val_samples = samples[n_train : n_train + n_val]
-        test_samples = samples[n_train + n_val :]
-
-        return {
-            "train": train_samples,
-            "val": val_samples,
-            "test": test_samples,
-        }
+        return samples

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import hydra
@@ -9,25 +10,23 @@ from omegaconf import DictConfig, OmegaConf
 from tfmamba.helper.dataset import Dataset
 from tfmamba.helper.pipeline import CWRUPipeline
 from tfmamba.protocol.experiment import ExperimentConfig, ExperimentMetadata
-from tfmamba.protocol.logger import ConsoleCommon
+from tfmamba.protocol.logger import ConsoleProtocol
 from tfmamba.protocol.metrics import Metrics
 from tfmamba.utils.dataloader import build_dataloader
 from tfmamba.utils.logger import setup_loguru_logger
 from tfmamba.utils.metrics import compute_metrics
 
 
-def setup_console(instance) -> ConsoleCommon:
+def setup_console(instance) -> ConsoleProtocol:
     console = instantiate(instance)
-    assert isinstance(console, ConsoleCommon)
+    assert isinstance(console, ConsoleProtocol)
     return console
 
 
-def build_model(instance, num_classes: int, in_channels: int, hidden_dim: int) -> torch.nn.Module:
+def build_model(instance, num_classes: int) -> torch.nn.Module:
     model = instantiate(
         instance,
         num_classes=num_classes,
-        in_channels=in_channels,
-        hidden_dim=hidden_dim,
     )
     return model
 
@@ -81,14 +80,14 @@ def main(cfg: DictConfig):
     model = build_model(
         cfg.model.instance,
         num_classes=config.num_classes,
-        in_channels=1,
-        hidden_dim=64,
     ).to(device)
 
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
     logger.info("Starting training...")
+    save_model_path = "best_model.pth"
+    best_val_oa = 0.0
     for epoch in range(config.epochs):
         # --------
         # Train
@@ -132,6 +131,7 @@ def main(cfg: DictConfig):
             precision=train_metrics_dict["precision"],
             f1_score=train_metrics_dict["f1_score"],
         )
+        console.log(metrics=train_metrics, stage="train")
 
         # --------
         # Val
@@ -173,15 +173,76 @@ def main(cfg: DictConfig):
             precision=val_metrics_dict["precision"],
             f1_score=val_metrics_dict["f1_score"],
         )
-
-        console.log(metrics=train_metrics, stage="train")
         console.log(metrics=val_metrics, stage="val")
 
         logger.info(
-            f"Epoch [{epoch + 1}/{config.epochs}] "
-            f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} "
+            f"Epoch {(epoch + 1):02}/{config.epochs} | "
+            f"Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | "
             f"Train OA: {train_metrics.oa:.4f} | Val OA: {val_metrics.oa:.4f}"
         )
+
+        # Save best model
+        if val_metrics.oa > max(best_val_oa, 0.750):
+            best_val_oa = val_metrics.oa
+            torch.save(model.state_dict(), save_model_path)
+
+    # --------
+    # Test
+    # --------
+    if not os.path.exists(save_model_path):
+        logger.warning("No best model found, skipping testing.")
+        return
+    else:
+        logger.info("Testing the best model...")
+
+    model.load_state_dict(torch.load(save_model_path))
+
+    model.eval()
+    test_loss = 0.0
+
+    all_test_logits = []
+    all_test_targets = []
+
+    with torch.no_grad():
+        for x, y in test_loader:
+            x, y = x.to(device), y.to(device)
+
+            logits = model(x)
+            loss = criterion(logits, y)
+
+            test_loss += loss.item()
+
+            all_test_logits.append(logits.cpu())
+            all_test_targets.append(y.cpu())
+
+    avg_test_loss = test_loss / len(test_loader)
+
+    test_logits = torch.cat(all_test_logits, dim=0)
+    test_targets = torch.cat(all_test_targets, dim=0)
+
+    test_metrics_dict = compute_metrics(
+        logits=test_logits,
+        targets=test_targets,
+        num_classes=config.num_classes,
+    )
+
+    test_metrics = Metrics(
+        step=0,  # No step for test metrics
+        loss=avg_test_loss,
+        oa=test_metrics_dict["oa"],
+        recall=test_metrics_dict["recall"],
+        precision=test_metrics_dict["precision"],
+        f1_score=test_metrics_dict["f1_score"],
+    )
+
+    console.log(metrics=test_metrics, stage="test")
+    logger.info(
+        f"Test Loss: {avg_test_loss:.4f} | "
+        f"OA: {test_metrics.oa:.4f} | "
+        f"Recall: {test_metrics.recall:.4f} | "
+        f"Precision: {test_metrics.precision:.4f} | "
+        f"F1 Score: {test_metrics.f1_score:.4f}"
+    )
 
 
 if __name__ == "__main__":
