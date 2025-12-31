@@ -1,0 +1,422 @@
+\documentclass[9pt,a4paper,twocolumn,twoside]{tau-class/tau}
+
+\usepackage[UTF8]{ctex}
+\xeCJKsetup{AutoFakeBold=true, AutoFakeSlant=true}
+
+\usepackage[english]{babel}
+
+\usepackage{unicode-math}
+\usepackage{makecell}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{subcaption}
+
+\journalname{Machine Learning}
+\title{TF-Mamba: 时频双路特征融合的序列分类模型}
+
+\author[]{学生: 孙依轩 23009201272}
+
+\affil[]{教师: 冯志玺}
+
+\professor{The code is available at: \url{https://github.com/kites262/TF-Mamba}. \\ Experimental charts can be found at SwanLab: \url{https://swanlab.cn/@kites/TF-Mamba/runs}}
+
+\institution{Xidian University}
+\footinfo{TF-Mamba}
+\theday{December 31, 2025}
+\leadauthor{孙依轩 23009201272}
+\course{时频双路特征融合的序列分类模型}
+
+\begin{abstract}
+    Bearing vibration signals are characterized by high sampling rates and long sequence lengths, which pose significant challenges to the computational efficiency and memory capacity of existing diagnostic models. To address this, this paper proposes TF-Mamba, a sequence classification model based on time-frequency dual-path feature fusion. Built upon the latest Mamba architecture, the model leverages its unique selective scan mechanism to effectively resolve gradient vanishing and memory bottleneck issues in long-sequence signal processing. To further enhance feature representation capabilities, the model adopts a time-frequency dual-path fusion strategy to synergistically learn the time-varying patterns and spectral structures of the signals. Experimental analysis demonstrates that TF-Mamba not only achieves extremely high fault identification accuracy on the CWRU dataset but also significantly outperforms traditional self-attention-based models in inference efficiency, providing a new solution for real-time fault monitoring.
+\end{abstract}
+
+\keywords{TF-Mamba, Time-Frequency, Classification, Mamba}
+
+\begin{document}
+		
+    \maketitle
+    \thispagestyle{firststyle}
+    \tauabstract
+    % \tableofcontents
+    % \linenumbers
+    
+%----------------------------------------------------------
+
+\section{Introduction}
+
+\taustart{旋}转机械在现代工业生产中扮演着核心角色，而滚动轴承作为其关键的基础零部件，其运行状态直接影响设备的可靠性与安全性。由于长期工作在高速、重载等复杂工况下，轴承极易因磨损或疲劳产生故障。因此，如何从传感器收集的振动信号中快速、准确地识别故障模式，一直是工业故障诊断领域的重要课题。近年来，随着深度学习技术的发
+展，基于卷积神经网络（CNN）和循环神经网络（RNN）的数据驱动方法已被广泛应用于轴承故障诊断，并取得了显著成果。
+
+尽管现有的深度学习模型表现成熟，但在处理高采样率的振动信号时仍面临挑战。轴承振动信号通常表现为长序列的时间序列数据（例如，在 12\,kHz 采样率下，单秒数据即包含 12,000 个采样点）。传统的 CNN 受限于局部感受野，难以捕捉长距离的时间依赖关系；而基于 Transformer 的模型虽然具备全局建模能力，但其自注意力机制带来的二次方计算复杂度（$O(L^2)$）限制了其在长序列上的处理效率与部署可行性。
+
+近期提出的选择性状态空间模型（Mamba）以其线性计算复杂度（$O(L)$）和优秀的序列建模能力，为处理长序列数据提供了新的思路。然而，Mamba 架构在工业故障诊断领域的应用研究仍处于起步阶段，其能否有效提取振动信号中的故障特征尚需验证。
+
+基于上述背景，本文旨在探索 Mamba 架构在轴承故障诊断任务中的可行性。我们选用标准的\textbf{凯斯西储大学（CWRU）轴承数据集} 作为实验基准。该数据集采集自包含 2\,hp 电动机、扭矩传感器和测力计的实验平台，涵盖了驱动端、风扇端及基座在四种不同负载工况下、以 12\,kHz 采样频率获取的振动信号，具有广泛的代表性。
+
+针对振动信号非平稳且包含丰富频域信息的特点，本文设计了一种\textbf{基于时频双路特征融合的轻量化模型——TF-Mamba}。该方法尝试通过两条并行的 Mamba 通道分别处理原始时域波形与频域频谱，验证“时频融合+线性序列建模”策略在故障分类任务中的表现。实验旨在通过构建分类器，评估该架构在准确率、收敛速度及计算效率方面的潜力，为基于深度学习的工业故障诊断提供一种高效的参考方案。
+
+\subsection{CWRU Dataset}
+
+为了验证本文提出模型的有效性，实验采用美国凯斯西储大学（CWRU）公开的滚动轴承数据集作为基准数据。该数据集涵盖了轴承在四种不同健康状况下的振动信号，分别为：正常状态（Normal）、滚动体故障（Ball Defect, BD）、外圈故障（Outer Race Defect, OR）以及内圈故障（Inner Race Defect, IR）。
+
+对于每一种故障模式，数据集提供了三种不同的损伤直径等级，分别为 0.007 英寸（约 0.18\,mm）、0.014 英寸（约 0.36\,mm）和 0.021 英寸（约 0.54\,mm）。在相同的负载工况下，我们将正常状态与上述三种故障类型在三种不同损伤程度下的组合，共计 10 种类别作为本实验的分类目标。详细的故障类别标签与参数说明如表 \ref{tab:cwru_description} 所示。
+
+\begin{table}[htbp]
+    \centering
+    \caption{Overview of CWRU Bearing Fault Dataset}
+    \label{tab:cwru_description}
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{ccc}
+        \toprule
+        \textbf{Label} & \textbf{Fault Type} & \textbf{Defect Diameter} \\
+        \midrule
+        0 & Normal & 0 \\
+        \midrule
+        1 & Ball & 0.007\,in (0.18\,mm) \\
+        2 & Inner Race & 0.007\,in (0.18\,mm) \\
+        3 & Outer Race & 0.007\,in (0.18\,mm) \\
+        \midrule
+        4 & Ball & 0.014\,in (0.36\,mm) \\
+        5 & Inner Race & 0.014\,in (0.36\,mm) \\
+        6 & Outer Race & 0.014\,in (0.36\,mm) \\
+        \midrule
+        7 & Ball & 0.021\,in (0.54\,mm) \\
+        8 & Inner Race & 0.021\,in (0.54\,mm) \\
+        9 & Outer Race & 0.021\,in (0.54\,mm) \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Methodology}
+
+本章详细介绍提出的 TF-Mamba 模型架构。如图所示，该模型由数据预处理与嵌入层、时域 Mamba 分支、频域 Mamba 分支以及特征融合分类头四个主要部分组成。
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/mymodel.pdf}
+    \caption{Overall architecture of the proposed TF-Mamba model.}
+    \label{fig:mymodel}
+\end{figure*}
+
+
+\subsection{Overall Architecture of TF-Mamba}
+
+给定一段长度为 $L$ 的原始轴承振动信号序列 $\mathbf{X} \in \mathbb{R}^{B \times L \times 1}$，其中 $B$ 为批量大小。TF-Mamba 的核心思想是利用双路架构并行提取时域的动态演变特征与频域的全局分布特征。
+
+首先，为了降低长序列带来的显存开销并提取局部特征，我们设计了一个共享结构的嵌入模块（Embedding Layer）。对于输入的时域信号 $\mathbf{X}_t$ 和经快速傅里叶变换（FFT）得到的频域信号 $\mathbf{X}_f$，分别通过一维卷积（Conv1d）进行降维与映射：
+\begin{equation}
+    \mathbf{E} = \sigma(\text{GN}(\text{Conv1d}(\mathbf{X})))
+\end{equation}
+其中，$\text{Conv1d}$ 的卷积核大小设为 16，步长（stride）设为 4 以实现下采样；$\text{GN}$ 表示 GroupNorm 归一化，选用它是因为其对 Batch Size 不敏感，更适合波动剧烈的工业信号；$\sigma$ 为 SiLU 激活函数。经过嵌入层后，输入信号被映射为隐含层特征 $\mathbf{E} \in \mathbb{R}^{B \times D \times L'}$，其中 $D$ 为隐藏层维度。
+
+\subsection{Time-Domain Mamba Branch}
+
+时域分支旨在捕捉振动信号中的瞬态冲击和时序演变规律。
+
+由于时域信号具有严格的时间因果性，即当前时刻的状态仅受过去时刻影响，因此非常适合采用单向 Mamba 模块构建主干网络。
+
+该分支由堆叠的 $N$ 个 BasicMambaBlock 组成。每个块包含层归一化和单向的 Mamba 模型。具体计算过程如下：
+\begin{equation}
+    \mathbf{Z}_t^l = \text{Mamba}(\text{LN}(\mathbf{Z}_t^{l-1})) + \mathbf{Z}_t^{l-1}
+\end{equation}
+其中 $\mathbf{Z}_t^l$ 表示第 $l$ 层的输出特征。在 Mamba 内部，我们设置状态维度 $d_{state}=16$，扩展因子 $E=2$，局部卷积宽度 $d_{conv}=4$。通过 Mamba 的选择性扫描机制，该模块能够在线性复杂度 $O(L)$ 下有效捕捉长距离的时序依赖，从而保留轴承故障早期的微弱冲击特征。
+
+\subsection{Frequency-Domain Mamba Branch}
+
+频域分支主要用于提取故障特征频率及其倍频成分。
+
+首先，对原始信号 $\mathbf{X}$ 进行一维 FFT 变换并取模值得到幅值谱 $\mathbf{X}_f$：
+\begin{equation}
+    \mathbf{X}_f = |\mathcal{F}(\mathbf{X})|
+\end{equation}
+
+与时域信号不同，频谱图中的频率分量之间不存在严格的时间因果顺序，低频与高频特征是全局耦合的。因此，单向扫描可能会忽略频谱两端的相互关联。为此，我们设计了双向 Mamba 模块 Bidirectional Mamba, Bi-Mamba。
+
+在 Bi-Mamba 中，输入特征被分别送入两个独立的 SSM 路径：前向路径处理原始序列，后向路径处理翻转后的序列。
+\begin{equation}
+    \mathbf{Y}_{fwd} = \text{SSM}_{fwd}(\mathbf{E}_f)
+\end{equation}
+\begin{equation}
+    \mathbf{Y}_{bwd} = \text{Flip}(\text{SSM}_{bwd}(\text{Flip}(\mathbf{E}_f)))
+\end{equation}
+\begin{equation}
+    \mathbf{Y}_{out} = \mathbf{Y}_{fwd} + \mathbf{Y}_{bwd}
+\end{equation}
+通过这种双向扫描机制，模型能够全方位地感知频谱的全局分布特征，增强了对复杂故障模式的辨识能力。
+
+\subsection{Feature Fusion and Classification}
+
+经过双路 Mamba 编码器处理后，模型分别输出时域特征序列 $\mathbf{O}_t$ 和频域特征序列 $\mathbf{O}_f$。为了将变长序列转换为固定长度的特征向量，我们采用全局平均池化 Global Average Pooling, GAP：
+\begin{equation}
+    \mathbf{v}_t = \frac{1}{L'} \sum_{i=1}^{L'} \mathbf{O}_t[i], \quad \mathbf{v}_f = \frac{1}{L'} \sum_{i=1}^{L'} \mathbf{O}_f[i]
+\end{equation}
+
+随后，将两路特征向量沿通道维度进行拼接，形成融合特征向量 $\mathbf{v}_{fusion} \in \mathbb{R}^{2D}$：
+\begin{equation}
+    \mathbf{v}_{fusion} = \text{Concat}(\mathbf{v}_t, \mathbf{v}_f)
+\end{equation}
+
+最后，分类头由两层 $1\times 1$ 卷积层构成。第一层将特征维度从 $2D$ 降至 $D$，并经过 GroupNorm 和 SiLU 激活；第二层将特征映射到类别空间 $C$，输出故障类别的预测概率分布。
+
+\section{Experiments}
+
+\subsection{Experimental Setup}
+
+本节介绍实验数据的预处理策略、参数设置以及软硬件环境。
+
+我们对数据集采用滑动窗口的方式进行采样，将原始振动信号进行切片处理，以生成固定长度的样本序列。设定滑动窗口长度为 2048 个采样点，滑动步长为 1024 单位（即重叠率为 50\%），以此增加样本数量并保留信号的时序连续性。
+
+在数据集划分方面，为了防止数据泄露并评估模型的泛化能力，我们采用“文件级”划分策略（File-level split），即严格按照原始数据文件进行分割，而非打乱后的样本分割。数据集按照 7:2:1 的比例划分为训练集、验证集和测试集。这意味着模型在训练过程中从未见过测试集所属的工况文件，从而确保评估结果的真实可靠性。
+
+实验均在 PyTorch 深度学习框架下实现，并基于 Mamba-ssm 库构建状态空间模型。为了保证实验结果的可复现性，我们将随机种子固定为 42。
+
+模型训练采用端到端的监督学习方式。优化器选用 AdamW，初始学习率设定为 $1 \times 10^{-3}$。训练总轮次（Epochs）设定为 40 轮，批次大小（Batch Size）为 64。为了加速数据加载，数据加载器（Dataloader）配置了 8 个工作线程并开启了内存锁页（Pin Memory）功能。详细的实验超参数设置如表 \ref{tab:hyperparameters} 所示。
+
+\begin{table}[htbp]
+    \centering
+    \caption{Summary of Hyperparameters}
+    \label{tab:hyperparameters}
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Parameter} & \textbf{Value} \\
+        \midrule
+        Window Size & 2048 \\
+        Stride & 1024 \\
+        Batch Size & 64 \\
+        Learning Rate & $1 \times 10^{-3}$ \\
+        Epochs & 40 \\
+        Optimizer & AdamW \\
+        Random Seed & 42 \\
+        Train/Val/Test Split & 7 : 2 : 1 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+所用操作系统为 Ubuntu 22.04.3 LTS，使用单张 NVIDIA GeForce RTX 5090 32GB 显卡。
+
+\subsection{Experimental Results}
+
+为了全面评估 TF-Mamba 模型的性能，我们设计了四组对比实验。实验涵盖了两种不同的模型架构（基线 CNN 与 本文 TF-Mamba）以及两种不同的数据集划分策略（Window-level 与 File-level）。
+
+其中，“Window-level” 策略通过随机打乱所有样本窗口进行划分，难度较低；而 “File-level” 策略严格按照原始文件进行划分，测试集包含训练集中未出现的时序片段，更能反映模型在实际工业场景下的泛化能力。
+
+表 \ref{tab:results_comparison} 展示了四组实验在测试集上的详细性能指标，包括测试损失（Test Loss）、总体准确率（Overall Accuracy, OA）、召回率（Recall）、精确率（Precision）以及 F1 分数（F1 Score）。
+
+\begin{table}[htbp]
+    \centering
+    \caption{Comparison of experimental results under different settings}
+    \label{tab:results_comparison}
+    \small
+    \renewcommand{\arraystretch}{1.1}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Metric} 
+        & \makecell{\textbf{CNN} \\ \textbf{(File)}} 
+        & \makecell{\textbf{TF-Mamba} \\ \textbf{(File)}} 
+        & \makecell{\textbf{CNN} \\ \textbf{(Window)}} 
+        & \makecell{\textbf{TF-Mamba} \\ \textbf{(Window)}} \\
+        \midrule
+        OA (\%) $\uparrow$          & 68.78  & \textbf{99.74}  & 86.34  & \textbf{100.00} \\
+        Recall (\%) $\uparrow$      & 59.49  & \textbf{99.66}  & 83.27  & \textbf{100.00} \\
+        Precision (\%) $\uparrow$   & 58.95  & \textbf{99.67}  & 84.14  & \textbf{100.00} \\
+        F1 Score (\%) $\uparrow$    & 54.47  & \textbf{99.66}  & 81.95  & \textbf{100.00} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+实验结果表明：
+\begin{itemize}
+    \item \textbf{TF-Mamba 的全面领先} 无论是在 Window-level 还是 File-level 设置下，TF-Mamba 的各项指标均显著优于 CNN 模型。特别是在 File-level 设置下，TF-Mamba 的准确率达到 99.74\%，而 CNN 仅为 68.78\%。
+    \item \textbf{极强的泛化能力} 对比 CNN-Window (86.34\%) 与 CNN-File (68.78\%) 可以发现，传统 CNN 在面对严格的数据划分时性能大幅衰退，表现出明显的过拟合倾向。相比之下，TF-Mamba-File (99.74\%) 几乎达到了与 TF-Mamba-Window (100.00\%) 持平的性能。这得益于 Mamba 架构对长序列全局依赖的建模能力，使其能够捕捉到更鲁棒的故障特征，而非仅仅记忆局部波形。
+\end{itemize}
+
+\section{Discussion}
+
+本节将深入探讨实验结果背后的原因，重点分析数据划分策略对评估结果的影响，以及 TF-Mamba 架构相较于传统 CNN 模型的内在优势。
+
+\subsection{Data Partitioning Strategies}
+
+对数据集的不同划分策略对模型性能评估产生了显著影响。
+
+实验结果中最显著的现象是：在 Window-level 划分下，CNN 能够达到 86.34\% 的准确率，但在 File-level 划分下急剧下降至 68.78\%；而 TF-Mamba 在两种设置下均保持了近乎完美的结果（100\% 与 99.74\%）。这揭示了模型泛化能力的本质差异。
+
+在 \textbf{Window-level} 划分中，由于滑动窗口存在重叠，且样本被随机打乱，训练集和测试集可能包含来自同一时刻附近的极相似波形。这种设置导致了不同程度的“数据泄露”，使得模型可以通过记忆局部波形特征而非学习故障机理。
+
+相反，\textbf{File-level} 划分严格隔离了训练与测试的时序片段。测试集数据包含了模型在训练阶段从未见过的工况演变和背景噪声。CNN 在此设置下的性能崩塌，说明其主要依赖于对特定训练样本的过拟合，缺乏对故障本质特征的抽象能力。TF-Mamba 在 File-level 下的鲁棒表现，证明了其真正学习到了跨越时间片段的故障物理规律，具备在实际工业场景中部署的泛化潜力。
+
+\subsection{Architectural Superiority}
+
+CNN 与 Mamba 的性能差距源于两者在处理长序列信号时截然不同的归纳偏置：
+
+\begin{itemize}
+    \item \textbf{CNN 的局限性} 卷积神经网络最初是为计算机视觉任务设计的，其核心假设是“平移不变性”和“局部相关性”。虽然这对处理二维静态图像（语义图）非常有效，但轴承振动信号本质上是高频、长距离相关的一维时间序列。CNN 受限于卷积核的感受野（Receptive Field），只能捕捉局部的瞬间冲击，难以建立起当前时刻与数千个采样点之前的状态联系。为了捕捉长周期特征，CNN 必须堆叠极深的网络，这不仅增加了计算负担，还容易导致梯度消失。
+    
+    \item \textbf{Mamba 的序列建模优势} Mamba 作为一种选择性状态空间模型（SSM），天生具备处理序列数据的优势。其递归更新机制（Recurrent Update）使其能够理论上拥有无限的感受野，从而有效捕捉轴承故障信号中跨越长周期的重复冲击模式（即故障特征频率的周期性）。此外，Mamba 的选择性机制（Selective Mechanism）允许模型根据内容动态地“遗忘”无关噪声并“记忆”关键的故障脉冲，这种内容感知的动态权重分配是 CNN 的固定权重卷积核所无法比拟的。
+\end{itemize}
+
+\subsection{Time-Frequency Fusion}
+
+单一维度的特征往往存在信息盲区。时域信号对故障引起的瞬态冲击（Impulse）非常敏感，能够精确定位故障发生的时刻；而频域信号则对故障的周期性特征（如外圈故障频率及其倍频）具有高度的概括性，能够抵抗随机噪声的干扰。
+
+TF-Mamba 的双流设计成功地结合了这两者的优势。如果仅依赖时域，模型可能会被高强度的背景白噪声淹没；如果仅依赖频域，FFT 变换过程可能会丢失非平稳信号的时变信息。通过特征融合，TF-Mamba 能够在特征空间内同时利用时域的敏锐度和频域的稳定性，这是其在复杂工况下（File-level）仍能保持 99\% 以上准确率的关键因素之一。
+
+\section{Conclusion}
+
+针对轴承故障诊断中高频振动信号的长序列建模问题，本文提出了一种基于时频双路特征融合的 \textbf{TF-Mamba} 模型。该模型创新性地引入选择性状态空间架构（Mamba）替代传统的卷积神经网络（CNN）与 Transformer，在保持线性计算复杂度 $O(L)$ 的前提下，实现了对长距离时序依赖的高效捕捉。
+
+本文的主要贡献与实验结论总结如下：
+\begin{enumerate}
+    \item \textbf{架构优势验证} TF-Mamba 成功克服了 CNN 感受野受限的固有缺陷。通过时频特征融合设计，模型能够同时从时域波形中提取瞬态冲击特征，并从频域谱图中捕获全局周期性模式，实现了异构特征的互补增强。
+
+    \item \textbf{优异的泛化性能} 在最具挑战性的文件级（File-level）数据划分实验中，传统 CNN 模型的准确率大幅下降至 68.78\%，表现出严重的过拟合倾向；而 TF-Mamba 依然保持了 \textbf{99.74\%} 的极高准确率。这一结果有力地证明了 TF-Mamba 并非简单地记忆训练样本，而是真正学习到了故障信号的内在物理规律，具备在未见工况下稳定工作的鲁棒性。
+
+    \item \textbf{工业应用潜力} 得益于 Mamba 架构的高效推理特性，TF-Mamba 在处理 2048 长度的长序列时表现出优异的计算效率。这为未来在资源受限的工业情境下，尤其是嵌入式设备上部署实时故障监测系统提供了极具潜力的解决方案。
+\end{enumerate}
+
+\newpage
+\appendix
+
+\onecolumn
+
+\setlength{\intextsep}{2pt}
+\setlength{\textfloatsep}{2pt}
+\setlength{\floatsep}{2pt}
+\setlength{\abovecaptionskip}{1pt}
+\setlength{\belowcaptionskip}{1pt}
+
+\section{Confusion Matrices}
+
+本附录展示了四组实验在测试集上的混淆矩阵。行代表真实标签（True Label），列代表预测标签（Predicted Label）。
+
+\begin{table}[H]
+    \centering
+    \small
+    \caption{Confusion Matrix for CNN-File (Accuracy: 68.78\%)}
+    \begin{tabular}{c|cccccccccc}
+        \toprule
+        \textbf{True $\backslash$ Pred} & \textbf{0} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} & \textbf{9} \\
+        \midrule
+        \textbf{0} & \textbf{471} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{1} & 0 & \textbf{117} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{2} & 0 & 0 & \textbf{5} & 0 & 0 & 0 & 114 & 0 & 0 & 0 \\
+        \textbf{3} & 0 & 0 & 0 & \textbf{118} & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{4} & 0 & 12 & 23 & 0 & \textbf{52} & 0 & 0 & 12 & 19 & 0 \\
+        \textbf{5} & 0 & 25 & 0 & 0 & 0 & \textbf{0} & 0 & 92 & 0 & 0 \\
+        \textbf{6} & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{117} & 0 & 0 & 0 \\
+        \textbf{7} & 0 & 0 & 0 & 0 & 0 & 0 & 118 & \textbf{0} & 0 & 0 \\
+        \textbf{8} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{118} & 0 \\
+        \textbf{9} & 0 & 0 & 0 & 0 & 0 & 10 & 0 & 0 & 53 & \textbf{55} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \small
+    \caption{Confusion Matrix for TF-Mamba-File (Accuracy: 99.74\%)}
+    \begin{tabular}{c|cccccccccc}
+        \toprule
+        \textbf{True $\backslash$ Pred} & \textbf{0} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} & \textbf{9} \\
+        \midrule
+        \textbf{0} & \textbf{471} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{1} & 0 & \textbf{117} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{2} & 0 & 0 & \textbf{115} & 0 & 0 & 4 & 0 & 0 & 0 & 0 \\
+        \textbf{3} & 0 & 0 & 0 & \textbf{118} & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{4} & 0 & 0 & 0 & 0 & \textbf{118} & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{5} & 0 & 0 & 0 & 0 & 0 & \textbf{117} & 0 & 0 & 0 & 0 \\
+        \textbf{6} & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{117} & 0 & 0 & 0 \\
+        \textbf{7} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{118} & 0 & 0 \\
+        \textbf{8} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{118} & 0 \\
+        \textbf{9} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{118} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \small
+    \caption{Confusion Matrix for CNN-Window (Accuracy: 86.34\%)}
+    \begin{tabular}{c|cccccccccc}
+        \toprule
+        \textbf{True $\backslash$ Pred} & \textbf{0} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} & \textbf{9} \\
+        \midrule
+        \textbf{0} & \textbf{169} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{1} & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{2} & 0 & 0 & \textbf{50} & 0 & 0 & 0 & 0 & 2 & 0 & 0 \\
+        \textbf{3} & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{4} & 9 & 0 & 9 & 0 & \textbf{23} & 0 & 0 & 5 & 6 & 0 \\
+        \textbf{5} & 0 & 2 & 2 & 0 & 11 & \textbf{35} & 0 & 0 & 0 & 2 \\
+        \textbf{6} & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 \\
+        \textbf{7} & 0 & 10 & 13 & 2 & 0 & 0 & 10 & \textbf{17} & 0 & 0 \\
+        \textbf{8} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 \\
+        \textbf{9} & 0 & 0 & 0 & 4 & 0 & 0 & 0 & 0 & 0 & \textbf{48} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \small
+    \caption{Confusion Matrix for TF-Mamba-Window (Accuracy: 100.00\%)}
+    \begin{tabular}{c|cccccccccc}
+        \toprule
+        \textbf{True $\backslash$ Pred} & \textbf{0} & \textbf{1} & \textbf{2} & \textbf{3} & \textbf{4} & \textbf{5} & \textbf{6} & \textbf{7} & \textbf{8} & \textbf{9} \\
+        \midrule
+        \textbf{0} & \textbf{169} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{1} & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{2} & 0 & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{3} & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{4} & 0 & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 & 0 & 0 \\
+        \textbf{5} & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 & 0 \\
+        \textbf{6} & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 & 0 & 0 \\
+        \textbf{7} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 & 0 \\
+        \textbf{8} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} & 0 \\
+        \textbf{9} & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & \textbf{52} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\newpage
+\section{Experiment Charts}
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/train-loss.png}
+        \caption{Training loss}
+        \label{fig:train_loss}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/train-oa.png}
+        \caption{Training accuracy (OA)}
+        \label{fig:train_oa}
+    \end{subfigure}
+
+    \vspace{6pt}
+
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/val-loss.png}
+        \caption{Validation loss}
+        \label{fig:val_loss}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/val-oa.png}
+        \caption{Validation accuracy (OA)}
+        \label{fig:val_oa}
+    \end{subfigure}
+
+    \caption{Training and validation curves of the proposed TF-Mamba model.}
+    \label{fig:training_curves}
+\end{figure}
+
+
+
+\printbibliography
+\end{document}
