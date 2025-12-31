@@ -6,6 +6,7 @@ import torch
 from hydra.utils import instantiate
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from sklearn.metrics import confusion_matrix
 
 from tfmamba.helper.dataset import Dataset
 from tfmamba.helper.pipeline import CWRUPipeline
@@ -219,6 +220,11 @@ def main(cfg: DictConfig):
 
     test_logits = torch.cat(all_test_logits, dim=0)
     test_targets = torch.cat(all_test_targets, dim=0)
+
+    test_preds = torch.argmax(test_logits, dim=1)
+    cm = confusion_matrix(test_targets.numpy(), test_preds.numpy())
+
+    logger.info(f"Confusion Matrix:\n{cm}")
 
     test_metrics_dict = compute_metrics(
         logits=test_logits,
